@@ -1,7 +1,7 @@
 #[allow(unused_imports)]
 use std::collections::HashMap;
 use std::{
-    env::{current_dir, set_current_dir, split_paths, var_os},
+    env::{current_dir, home_dir, set_current_dir, split_paths, var_os},
     io::{self, Write},
     path::{Path, PathBuf},
     process::Command,
@@ -110,8 +110,19 @@ fn pwd(_: &[String]) {
 }
 
 fn cd(args: &[String]) {
+    fn expand_tilde<P: AsRef<Path>>(path: P) -> PathBuf {
+        let p = path.as_ref();
+
+        if p.starts_with("~") {
+            if let Some(home) = home_dir() {
+                return home.join(p.strip_prefix("~").unwrap());
+            }
+        };
+        p.to_path_buf()
+    }
+
     if let Some(path) = args.first() {
-        let path = Path::new(path);
+        let path = expand_tilde(Path::new(path));
         if path.is_dir() {
             set_current_dir(path).unwrap();
         } else {
