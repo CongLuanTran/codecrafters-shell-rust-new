@@ -2,9 +2,12 @@
 use std::collections::HashMap;
 use std::{
     env::{split_paths, var_os},
+    fs,
     io::{self, Write},
     path::{Path, PathBuf},
 };
+
+use is_executable::IsExecutable;
 
 struct Builtin {
     name: &'static str,
@@ -44,14 +47,14 @@ fn main() {
     }
 }
 
-fn find_path_exec<P>(exec_name: P) -> Option<PathBuf>
+fn find_path_exec<P>(exec: P) -> Option<PathBuf>
 where
     P: AsRef<Path>,
 {
     var_os("PATH").and_then(|paths| {
         split_paths(&paths).find_map(|dir| {
-            let full_path = dir.join(&exec_name);
-            if full_path.is_file() {
+            let full_path = dir.join(&exec);
+            if full_path.is_executable() {
                 Some(full_path)
             } else {
                 None
