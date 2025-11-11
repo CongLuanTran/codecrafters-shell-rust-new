@@ -5,6 +5,7 @@ use std::io::{self, Write};
 fn main() {
     let mut builtins: HashMap<&str, fn(&str)> = HashMap::new();
     builtins.insert("exit", exit);
+    builtins.insert("echo", echo);
 
     loop {
         let mut input = String::new();
@@ -28,4 +29,8 @@ fn main() {
 fn exit(args: &str) {
     let code = args.parse::<i32>().unwrap_or_default();
     std::process::exit(code)
+}
+
+fn echo(args: &str) {
+    println!("{}", args)
 }
