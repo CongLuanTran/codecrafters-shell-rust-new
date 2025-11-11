@@ -1,6 +1,10 @@
 #[allow(unused_imports)]
 use std::collections::HashMap;
-use std::io::{self, Write};
+use std::{
+    env::{split_paths, var_os},
+    io::{self, Write},
+    path::{Path, PathBuf},
+};
 
 struct Builtin {
     name: &'static str,
@@ -40,6 +44,22 @@ fn main() {
     }
 }
 
+fn find_path_exec<P>(exec_name: P) -> Option<PathBuf>
+where
+    P: AsRef<Path>,
+{
+    var_os("PATH").and_then(|paths| {
+        split_paths(&paths).find_map(|dir| {
+            let full_path = dir.join(&exec_name);
+            if full_path.is_file() {
+                Some(full_path)
+            } else {
+                None
+            }
+        })
+    })
+}
+
 fn exit(args: &str) {
     let code = args.parse::<i32>().unwrap_or_default();
     std::process::exit(code);
@@ -50,8 +70,12 @@ fn echo(args: &str) {
 }
 fn exec_type(args: &str) {
     if let Some(builtin) = BUILTINS.iter().find(|b| b.name == args) {
-        println!("{} is a shell builtin", builtin.name)
-    } else {
-        println!("{}: not found", args)
+        println!("{} is a shell builtin", builtin.name);
+        return;
     }
+    if let Some(exec) = find_path_exec(args) {
+        println!("{} is {:#}", args, exec.display());
+        return;
+    }
+    println!("{}: not found", args)
 }
