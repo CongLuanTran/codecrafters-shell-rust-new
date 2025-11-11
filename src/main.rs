@@ -1,7 +1,7 @@
 #[allow(unused_imports)]
 use std::collections::HashMap;
 use std::{
-    env::{split_paths, var_os},
+    env::{current_dir, split_paths, var_os},
     io::{self, Write},
     path::{Path, PathBuf},
     process::Command,
@@ -14,7 +14,7 @@ struct Builtin {
     func: fn(&[String]),
 }
 
-static BUILTINS: [Builtin; 3] = [
+static BUILTINS: [Builtin; 4] = [
     Builtin {
         name: "exit",
         func: exit,
@@ -26,6 +26,10 @@ static BUILTINS: [Builtin; 3] = [
     Builtin {
         name: "type",
         func: exec_type,
+    },
+    Builtin {
+        name: "pwd",
+        func: pwd,
     },
 ];
 
@@ -95,4 +99,7 @@ fn exec_type(args: &[String]) {
         }
         println!("{}: not found", cmd)
     }
+}
+fn pwd(_: &[String]) {
+    println!("{}", current_dir().unwrap_or_default().display());
 }
