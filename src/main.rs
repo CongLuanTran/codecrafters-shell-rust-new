@@ -2,16 +2,16 @@
 use std::collections::HashMap;
 use std::{
     env::{split_paths, var_os},
-    fs,
     io::{self, Write},
     path::{Path, PathBuf},
+    process::Command,
 };
 
 use is_executable::IsExecutable;
 
 struct Builtin {
     name: &'static str,
-    func: fn(&str),
+    func: fn(&[String]),
 }
 
 static BUILTINS: [Builtin; 3] = [
@@ -36,13 +36,19 @@ fn main() {
         io::stdout().flush().unwrap();
         io::stdin().read_line(&mut input).unwrap();
         for line in input.lines() {
-            if let Some((cmd, args)) = line.split_once(" ") {
-                if let Some(builtin) = BUILTINS.iter().find(|b| b.name == cmd) {
-                    (builtin.func)(args);
-                    continue;
+            if let Ok(words) = shellwords::split(line) {
+                if let Some(cmd) = words.first() {
+                    if let Some(cmd) = BUILTINS.iter().find(|b| b.name == cmd) {
+                        (cmd.func)(&words[1..]);
+                    } else if let Some(cmd) = find_path_exec(cmd) {
+                        let mut cmd = Command::new(cmd);
+                        cmd.args(&words[1..]);
+                        cmd.status().expect("error running the executable");
+                    } else {
+                        println!("{}: command not found", cmd);
+                    }
                 }
             }
-            println!("{}: command not found", line);
         }
     }
 }
@@ -63,22 +69,28 @@ where
     })
 }
 
-fn exit(args: &str) {
-    let code = args.parse::<i32>().unwrap_or_default();
+fn exit(args: &[String]) {
+    let code = args
+        .first()
+        .and_then(|s| s.parse::<i32>().ok())
+        .unwrap_or_default();
     std::process::exit(code);
 }
 
-fn echo(args: &str) {
-    println!("{}", args)
+fn echo(args: &[String]) {
+    println!("{}", args.join(" "))
 }
-fn exec_type(args: &str) {
-    if let Some(builtin) = BUILTINS.iter().find(|b| b.name == args) {
-        println!("{} is a shell builtin", builtin.name);
-        return;
+
+fn exec_type(args: &[String]) {
+    if let Some(cmd) = args.first() {
+        if let Some(builtin) = BUILTINS.iter().find(|b| b.name == cmd) {
+            println!("{} is a shell builtin", builtin.name);
+            return;
+        }
+        if let Some(exec) = find_path_exec(cmd) {
+            println!("{} is {:#}", cmd, exec.display());
+            return;
+        }
+        println!("{}: not found", cmd)
     }
-    if let Some(exec) = find_path_exec(args) {
-        println!("{} is {:#}", args, exec.display());
-        return;
-    }
-    println!("{}: not found", args)
 }
