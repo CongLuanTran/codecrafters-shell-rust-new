@@ -41,7 +41,7 @@ fn main() {
                     if let Some(cmd) = BUILTINS.iter().find(|b| b.name == cmd) {
                         (cmd.func)(&words[1..]);
                     } else if let Some(cmd) = find_path_exec(cmd) {
-                        let mut cmd = Command::new(cmd);
+                        let mut cmd = Command::new(cmd.file_name().unwrap());
                         cmd.args(&words[1..]);
                         cmd.status().expect("error running the executable");
                     } else {
