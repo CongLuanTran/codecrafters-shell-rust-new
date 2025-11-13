@@ -67,10 +67,16 @@ fn shell_exec(args: &[String], redirs: &mut Redirections) {
     }
 
     if let Some(cmd) = BUILTINS.iter().find(|b| b.name == args[0]) {
-        (cmd.func)(args, redirs);
-        return;
+        if let Err(e) = (cmd.func)(args, redirs) {
+            if let Err(e) = writeln!(redirs.stderr, "{}", e) {
+                eprintln!("shell_exec: {}", e)
+            }
+        } else if let Err(e) = redirs.stderr.write(b"") {
+            eprintln!("shell_exec: {}", e)
+        }
+    } else {
+        shell_launch(args, redirs);
     }
-    shell_launch(args, redirs);
 }
 
 fn shell_launch(args: &[String], redirs: &mut Redirections) {
