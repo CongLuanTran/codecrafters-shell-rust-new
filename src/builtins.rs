@@ -65,13 +65,13 @@ pub fn list_path() -> Result<Vec<PathBuf>> {
 
 fn shell_type(args: &[String], redirs: &mut Redirections) -> Result<()> {
     for cmd in args[1..].iter() {
-        if let Some(builtin) = BUILTINS.iter().find(|b| b.name == cmd) {
-            writeln!(redirs.stdout, "{} is a shell builtin", builtin.name)?;
+        if BUILTINS.iter().any(|b| b.name == cmd) {
+            writeln!(redirs.stdout, "{} is a shell builtin", cmd)?;
         } else if let Some(exec) = list_path()?
             .iter()
             .find(|p| p.file_name().unwrap().to_str().unwrap() == cmd)
         {
-            writeln!(redirs.stdout, "{} is a shell builtin", exec.display())?;
+            writeln!(redirs.stdout, "{} is {}", cmd, exec.display())?;
         } else {
             writeln!(redirs.stdout, "{}: not found", cmd)?;
         }
