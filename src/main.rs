@@ -54,7 +54,7 @@ impl Completer for MyHelper {
             .predictive_search(prefix)
             .map(|s: String| Pair {
                 display: s.clone(),
-                replacement: s,
+                replacement: s + " ",
             })
             .collect();
         Ok((0, targets))
