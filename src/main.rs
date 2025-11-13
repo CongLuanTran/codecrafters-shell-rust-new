@@ -1,17 +1,109 @@
-use codecrafters_shell::builtins::BUILTINS;
+use codecrafters_shell::builtins::{list_path, BUILTINS};
 use codecrafters_shell::redirections::{ErrorTarget, OutputTarget, Redirections};
+use rustyline::completion::{Completer, Pair};
+use rustyline::error::ReadlineError;
+use rustyline::highlight::{CmdKind, Highlighter, MatchingBracketHighlighter};
+use rustyline::hint::HistoryHinter;
+use rustyline::validate::MatchingBracketValidator;
+use rustyline::{
+    Cmd, CompletionType, Config, EditMode, Editor, Helper, Hinter, KeyEvent, Validator,
+};
+use std::borrow::Cow;
 use std::fs::OpenOptions;
-use std::io::{self, BufRead, BufReader, ErrorKind, Result, Write};
+use std::io::{self, BufRead, BufReader, ErrorKind, Write};
 use std::process::{exit, Command};
+use trie_rs::{Trie, TrieBuilder};
 
-fn main() -> Result<()> {
+#[derive(Helper, Hinter, Validator)]
+struct MyHelper {
+    trie: Trie<u8>,
+    #[rustyline(Completer)]
+    highlighter: MatchingBracketHighlighter,
+    #[rustyline(Validator)]
+    validator: MatchingBracketValidator,
+    #[rustyline(Hinter)]
+    hinter: HistoryHinter,
+}
+
+impl Highlighter for MyHelper {
+    fn highlight_hint<'h>(&self, hint: &'h str) -> Cow<'h, str> {
+        Cow::Owned("\x1b[1m".to_owned() + hint + "\x1b[m")
+    }
+
+    fn highlight<'l>(&self, line: &'l str, pos: usize) -> Cow<'l, str> {
+        self.highlighter.highlight(line, pos)
+    }
+
+    fn highlight_char(&self, line: &str, pos: usize, kind: CmdKind) -> bool {
+        self.highlighter.highlight_char(line, pos, kind)
+    }
+}
+
+impl Completer for MyHelper {
+    type Candidate = Pair;
+
+    fn complete(
+        &self, // FIXME should be `&mut self`
+        line: &str,
+        pos: usize,
+        _ctx: &rustyline::Context<'_>,
+    ) -> rustyline::Result<(usize, Vec<Self::Candidate>)> {
+        let prefix = &line[..pos];
+        let targets = self
+            .trie
+            .predictive_search(prefix)
+            .map(|s: String| Pair {
+                display: s.clone(),
+                replacement: s,
+            })
+            .collect();
+        Ok((0, targets))
+    }
+}
+
+fn main() -> rustyline::Result<()> {
+    let config = Config::builder()
+        .history_ignore_space(true)
+        .completion_type(CompletionType::List)
+        .edit_mode(EditMode::Vi)
+        .bell_style(rustyline::config::BellStyle::Audible)
+        .build();
+
+    let mut builder = TrieBuilder::new();
+    for builtin in BUILTINS {
+        builder.push(builtin.name);
+    }
+    for path in list_path()? {
+        let name = path.file_name().unwrap().to_str().unwrap();
+        builder.push(name);
+    }
+    let trie = builder.build();
+
+    let h = MyHelper {
+        trie,
+        highlighter: MatchingBracketHighlighter::new(),
+        hinter: HistoryHinter::new(),
+        validator: MatchingBracketValidator::new(),
+    };
+    let mut rl = Editor::with_config(config)?;
+    rl.set_helper(Some(h));
+    rl.bind_sequence(KeyEvent::alt('n'), Cmd::HistorySearchForward);
+    rl.bind_sequence(KeyEvent::alt('p'), Cmd::HistorySearchBackward);
     loop {
+        let readline = rl.readline("$ ");
         let mut input = String::new();
-        print!("$ ");
-        io::stdout().flush().unwrap();
-        if io::stdin().read_line(&mut input).unwrap() == 0 {
-            break;
-        };
+        match readline {
+            Err(ReadlineError::Interrupted) => continue,
+            Err(ReadlineError::Eof) => break,
+            Err(err) => {
+                eprintln!("Input Error: {}", err)
+            }
+            Ok(lines) => {
+                rl.add_history_entry(lines.as_str())?;
+                input = lines.to_string()
+            }
+        }
+
         for line in input.lines() {
             if let Ok(parts) = shellwords::split(line) {
                 let mut parts = parts.iter();
@@ -52,7 +144,7 @@ fn main() -> Result<()> {
     Ok(())
 }
 
-fn shell_exec(args: &[String], redirs: &mut Redirections) -> Result<()> {
+fn shell_exec(args: &[String], redirs: &mut Redirections) -> io::Result<()> {
     if args.is_empty() {
         eprintln!("shell_exec: args is empty");
         exit(exitcode::UNAVAILABLE)
@@ -77,7 +169,7 @@ fn shell_exec(args: &[String], redirs: &mut Redirections) -> Result<()> {
     Ok(())
 }
 
-fn shell_launch(args: &[String], redirs: &mut Redirections) -> Result<()> {
+fn shell_launch(args: &[String], redirs: &mut Redirections) -> io::Result<()> {
     if args.is_empty() {
         eprintln!("shell_launch: args is empty");
         exit(exitcode::UNAVAILABLE)

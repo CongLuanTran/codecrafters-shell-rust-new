@@ -2,6 +2,7 @@ use crate::redirections::Redirections;
 use is_executable::is_executable;
 use std::env::split_paths;
 use std::env::{current_dir, home_dir, set_current_dir, var_os};
+use std::fs;
 use std::io::{Result, Write};
 use std::path::{Path, PathBuf};
 use std::process::exit;
@@ -44,27 +45,33 @@ pub fn shell_echo(args: &[String], redirs: &mut Redirections) -> Result<()> {
     writeln!(redirs.stdout, "{}", args[1..].join(" "))
 }
 
-fn shell_type(args: &[String], redirs: &mut Redirections) -> Result<()> {
-    fn find_path<P>(cmd: P) -> Option<PathBuf>
-    where
-        P: AsRef<Path>,
-    {
-        var_os("PATH").and_then(|paths| {
-            split_paths(&paths).find_map(|dir| {
-                let path = dir.join(&cmd);
-                if path.is_file() && is_executable(&path) {
-                    Some(path)
-                } else {
-                    None
+pub fn list_path() -> Result<Vec<PathBuf>> {
+    let mut exec = Vec::new();
+    if let Some(paths) = var_os("PATH") {
+        for path in split_paths(&paths) {
+            if path.is_dir() {
+                for entry in fs::read_dir(path)? {
+                    let path = entry?.path();
+                    if path.is_file() && is_executable(&path) {
+                        exec.push(path);
+                    }
                 }
-            })
-        })
+            }
+        }
     }
+
+    Ok(exec)
+}
+
+fn shell_type(args: &[String], redirs: &mut Redirections) -> Result<()> {
     for cmd in args[1..].iter() {
         if let Some(builtin) = BUILTINS.iter().find(|b| b.name == cmd) {
             writeln!(redirs.stdout, "{} is a shell builtin", builtin.name)?;
-        } else if let Some(exec) = find_path(cmd) {
-            writeln!(redirs.stdout, "{} is {:#}", cmd, exec.display())?;
+        } else if let Some(exec) = list_path()?
+            .iter()
+            .find(|p| p.file_name().unwrap().to_str().unwrap() == cmd)
+        {
+            writeln!(redirs.stdout, "{} is a shell builtin", exec.display())?;
         } else {
             writeln!(redirs.stdout, "{}: not found", cmd)?;
         }
