@@ -1,13 +1,15 @@
+use crate::redirections::Redirections;
 use is_executable::is_executable;
 use std::env::split_paths;
 use std::env::{current_dir, home_dir, set_current_dir, var_os};
+use std::io::Write;
 use std::path::{Path, PathBuf};
 use std::process::exit;
 
 #[derive(Debug, Clone, Copy)]
 pub struct Builtin {
     pub name: &'static str,
-    pub func: fn(&[String]),
+    pub func: fn(&[String], redirs: &mut Redirections),
 }
 
 pub static BUILTINS: [Builtin; 5] = [
@@ -33,16 +35,16 @@ pub static BUILTINS: [Builtin; 5] = [
     },
 ];
 
-fn shell_exit(args: &[String]) {
+fn shell_exit(args: &[String], _: &mut Redirections) {
     let code = args.get(1).and_then(|s| s.parse().ok()).unwrap_or_default();
     exit(code);
 }
 
-pub fn shell_echo(args: &[String]) {
-    println!("{}", args[1..].join(" "))
+pub fn shell_echo(args: &[String], redirs: &mut Redirections) {
+    writeln!(redirs.stdout, "{}", args[1..].join(" "));
 }
 
-fn shell_type(args: &[String]) {
+fn shell_type(args: &[String], redirs: &mut Redirections) {
     fn find_path<P>(cmd: P) -> Option<PathBuf>
     where
         P: AsRef<Path>,
@@ -60,22 +62,26 @@ fn shell_type(args: &[String]) {
     }
     for cmd in args[1..].iter() {
         if let Some(builtin) = BUILTINS.iter().find(|b| b.name == cmd) {
-            println!("{} is a shell builtin", builtin.name);
+            writeln!(redirs.stdout, "{} is a shell builtin", builtin.name);
             return;
         }
         if let Some(exec) = find_path(cmd) {
-            println!("{} is {:#}", cmd, exec.display());
+            writeln!(redirs.stdout, "{} is {:#}", cmd, exec.display());
             return;
         }
-        println!("{}: not found", cmd)
+        writeln!(redirs.stdout, "{}: not found", cmd);
     }
 }
 
-fn shell_pwd(_: &[String]) {
-    println!("{}", current_dir().unwrap_or_default().display());
+fn shell_pwd(_: &[String], redirs: &mut Redirections) {
+    writeln!(
+        redirs.stdout,
+        "{}",
+        current_dir().unwrap_or_default().display()
+    );
 }
 
-fn shell_cd(args: &[String]) {
+fn shell_cd(args: &[String], redirs: &mut Redirections) {
     fn expand_tilde<P: AsRef<Path>>(path: P) -> PathBuf {
         let p = path.as_ref();
 
@@ -91,6 +97,10 @@ fn shell_cd(args: &[String]) {
     if path.is_dir() {
         set_current_dir(path).unwrap();
     } else {
-        println!("cd: {}: No such file or directory", path.display());
+        writeln!(
+            redirs.stdout,
+            "cd: {}: No such file or directory",
+            path.display()
+        );
     }
 }

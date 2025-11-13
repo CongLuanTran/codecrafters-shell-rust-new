@@ -1,8 +1,8 @@
 use codecrafters_shell::builtins::BUILTINS;
-use codecrafters_shell::redirections::Redirections;
-use std::fs::File;
-use std::io::{self, stdout, ErrorKind, Read, Write};
-use std::process::{exit, Command, Stdio};
+use codecrafters_shell::redirections::{ErrorTarget, OutputTarget, Redirections};
+use std::io::{self, ErrorKind, Write};
+use std::path::PathBuf;
+use std::process::{exit, Command};
 
 fn main() {
     loop {
@@ -20,60 +20,76 @@ fn main() {
                 while let Some(part) = parts.next() {
                     match part.as_str() {
                         ">" | "1>" => {
-                            let file = File::create(parts.next().unwrap()).unwrap();
-                            redirs.stdout = Some(Box::new(file));
+                            let file = PathBuf::from(parts.next().unwrap());
+                            redirs.stdout = OutputTarget::File {
+                                path: file,
+                                handle: None,
+                                append: false,
+                            }
+                        }
+                        ">>" | "1>>" => {
+                            let file = PathBuf::from(parts.next().unwrap());
+                            redirs.stdout = OutputTarget::File {
+                                path: file,
+                                handle: None,
+                                append: true,
+                            }
+                        }
+                        "2>" => {
+                            let file = PathBuf::from(parts.next().unwrap());
+                            redirs.stderr = ErrorTarget::File {
+                                path: file,
+                                handle: None,
+                                append: false,
+                            }
+                        }
+                        "2>>" => {
+                            let file = PathBuf::from(parts.next().unwrap());
+                            redirs.stderr = ErrorTarget::File {
+                                path: file,
+                                handle: None,
+                                append: true,
+                            }
                         }
                         _ => args.push(part.to_string()),
                     }
                 }
-                shell_exec(&args, redirs);
+                shell_exec(&args, &mut redirs);
             }
         }
     }
 }
 
-fn shell_exec(args: &[String], redirs: Redirections) {
+fn shell_exec(args: &[String], redirs: &mut Redirections) {
+    if args.is_empty() {
+        eprintln!("shell_exec: args is empty");
+        exit(exitcode::UNAVAILABLE)
+    }
+
     if let Some(cmd) = BUILTINS.iter().find(|b| b.name == args[0]) {
-        (cmd.func)(args);
+        (cmd.func)(args, redirs);
         return;
     }
     shell_launch(args, redirs);
 }
 
-fn shell_launch(args: &[String], mut redirs: Redirections) {
+fn shell_launch(args: &[String], redirs: &mut Redirections) {
     if args.is_empty() {
         eprintln!("shell_launch: args is empty");
-        exit(exitcode::USAGE)
+        exit(exitcode::UNAVAILABLE)
     }
-
-    let mut builder = Command::new(&args[0]);
-
-    if redirs.stdout.is_some() {
-        builder.stdout(Stdio::piped());
-    }
-
-    let program = builder.args(&args[1..]).spawn();
-
-    match program {
-        Err(e) => match e.kind() {
-            ErrorKind::NotFound => {
-                eprintln!("{}: command not found", &args[0]);
-            }
+    let mut exec = Command::new(&args[0]);
+    let program = exec
+        .args(&args[1..])
+        .stdout(redirs.stdout.to_stdio())
+        .stderr(redirs.stderr.to_stdio());
+    if let Err(e) = program.status() {
+        match e.kind() {
+            ErrorKind::NotFound => eprintln!("{}: command not found", args[0]),
             _ => {
-                eprintln!("Unknown Error: {}", e);
+                eprintln!("shell_launch: {}", e);
                 exit(exitcode::UNAVAILABLE)
             }
-        },
-        Ok(mut child) => {
-            if let Some(mut child_stdout) = child.stdout.take() {
-                let mut buffer = Vec::new();
-                child_stdout.read_to_end(&mut buffer).unwrap();
-                let mut stdout = redirs.stdout.take().unwrap_or(Box::new(stdout()));
-                stdout.write_all(&buffer).unwrap();
-            }
-            if let Err(e) = child.wait() {
-                eprintln!("Unknown Error: {}", e)
-            }
         }
-    }
+    };
 }
