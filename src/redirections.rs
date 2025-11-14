@@ -1,5 +1,5 @@
 use os_pipe::{PipeReader, PipeWriter};
-use std::fs::File;
+use std::fs::{File, OpenOptions};
 use std::io::{stderr, stdin, stdout, Read, Result, Stderr, Stdin, Stdout, Write};
 use std::process::Stdio;
 
@@ -20,11 +20,11 @@ impl Read for InputSource {
 }
 
 impl InputSource {
-    pub fn to_stdio(&self) -> Stdio {
+    pub fn to_stdio(&self) -> Result<Stdio> {
         match self {
-            InputSource::Stdin(_) => Stdio::inherit(),
-            InputSource::File(_) => Stdio::piped(),
-            InputSource::Pipe(_) => Stdio::piped(),
+            InputSource::Stdin(_) => Ok(Stdio::inherit()),
+            InputSource::File(f) => Ok(Stdio::from(f.try_clone()?)),
+            InputSource::Pipe(p) => Ok(Stdio::from(p.try_clone()?)),
         }
     }
 }
@@ -54,11 +54,11 @@ impl Write for OutputTarget {
 }
 
 impl OutputTarget {
-    pub fn to_stdio(&self) -> Stdio {
+    pub fn to_stdio(&self) -> Result<Stdio> {
         match self {
-            OutputTarget::Stdout(_) => Stdio::inherit(),
-            OutputTarget::File(_) => Stdio::piped(),
-            OutputTarget::Pipe(_) => Stdio::piped(),
+            OutputTarget::Stdout(_) => Ok(Stdio::inherit()),
+            OutputTarget::File(f) => Ok(Stdio::from(f.try_clone()?)),
+            OutputTarget::Pipe(p) => Ok(Stdio::from(p.try_clone()?)),
         }
     }
 }
@@ -88,11 +88,11 @@ impl Write for ErrorTarget {
 }
 
 impl ErrorTarget {
-    pub fn to_stdio(&self) -> Stdio {
+    pub fn to_stdio(&self) -> Result<Stdio> {
         match self {
-            ErrorTarget::Stderr(_) => Stdio::inherit(),
-            ErrorTarget::File(_) => Stdio::piped(),
-            ErrorTarget::Pipe(_) => Stdio::piped(),
+            ErrorTarget::Stderr(_) => Ok(Stdio::inherit()),
+            ErrorTarget::File(f) => Ok(Stdio::from(f.try_clone()?)),
+            ErrorTarget::Pipe(p) => Ok(Stdio::from(p.try_clone()?)),
         }
     }
 }
@@ -117,4 +117,40 @@ impl Redirections {
             stderr: ErrorTarget::Stderr(stderr()),
         }
     }
+}
+
+// Handle redirections
+pub fn parse_redirections(words: &[String]) -> (Vec<String>, Redirections) {
+    let mut words = words.iter();
+    let mut args = Vec::new();
+    let mut redirs = Redirections::new();
+    let mut openner = OpenOptions::new();
+    let options = openner.create(true).write(true);
+    while let Some(part) = words.next() {
+        match part.as_str() {
+            ">" | "1>" => {
+                let path = words.next().unwrap();
+                let file = options.truncate(true).open(path).unwrap();
+                redirs.stdout = OutputTarget::File(file);
+            }
+            ">>" | "1>>" => {
+                let path = words.next().unwrap();
+                let file = options.truncate(false).append(true).open(path).unwrap();
+                redirs.stdout = OutputTarget::File(file);
+            }
+            "2>" => {
+                let path = words.next().unwrap();
+                let file = options.truncate(true).open(path).unwrap();
+                redirs.stderr = ErrorTarget::File(file);
+            }
+            "2>>" => {
+                let path = words.next().unwrap();
+                let file = options.truncate(false).append(true).open(path).unwrap();
+                redirs.stderr = ErrorTarget::File(file);
+            }
+            _ => args.push(part.to_string()),
+        }
+    }
+
+    (args, redirs)
 }

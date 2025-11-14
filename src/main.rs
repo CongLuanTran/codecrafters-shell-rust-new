@@ -1,101 +1,15 @@
-use codecrafters_shell::builtins::{list_path, BUILTINS};
-use codecrafters_shell::redirections::{ErrorTarget, InputSource, OutputTarget, Redirections};
-use rustyline::completion::{Completer, Pair};
-use rustyline::error::ReadlineError;
-use rustyline::highlight::{CmdKind, Highlighter, MatchingBracketHighlighter};
-use rustyline::hint::HistoryHinter;
-use rustyline::validate::MatchingBracketValidator;
-use rustyline::{
-    Cmd, CompletionType, Config, EditMode, Editor, Helper, Hinter, KeyEvent, Validator,
+use codecrafters_shell::builtins::BUILTINS;
+use codecrafters_shell::readline::create_readline;
+use codecrafters_shell::redirections::{
+    parse_redirections, InputSource, OutputTarget, Redirections,
 };
-use std::borrow::Cow;
-use std::fs::OpenOptions;
+use rustyline::error::ReadlineError;
 use std::io::Write;
-use std::io::{self, BufRead, BufReader, ErrorKind};
-use std::process::{exit, Command};
-use trie_rs::{Trie, TrieBuilder};
-
-#[derive(Helper, Hinter, Validator)]
-struct MyHelper {
-    trie: Trie<u8>,
-    #[rustyline(Completer)]
-    highlighter: MatchingBracketHighlighter,
-    #[rustyline(Validator)]
-    validator: MatchingBracketValidator,
-    #[rustyline(Hinter)]
-    hinter: HistoryHinter,
-}
-
-impl Highlighter for MyHelper {
-    fn highlight_hint<'h>(&self, hint: &'h str) -> Cow<'h, str> {
-        Cow::Owned("\x1b[1m".to_owned() + hint + "\x1b[m")
-    }
-
-    fn highlight<'l>(&self, line: &'l str, pos: usize) -> Cow<'l, str> {
-        self.highlighter.highlight(line, pos)
-    }
-
-    fn highlight_char(&self, line: &str, pos: usize, kind: CmdKind) -> bool {
-        self.highlighter.highlight_char(line, pos, kind)
-    }
-}
-
-impl Completer for MyHelper {
-    type Candidate = Pair;
-
-    fn complete(
-        &self, // FIXME should be `&mut self`
-        line: &str,
-        pos: usize,
-        _ctx: &rustyline::Context<'_>,
-    ) -> rustyline::Result<(usize, Vec<Self::Candidate>)> {
-        let prefix = &line[..pos];
-        let targets = self
-            .trie
-            .predictive_search(prefix)
-            .map(|s: String| Pair {
-                display: s.clone(),
-                replacement: s + " ",
-            })
-            .collect();
-        Ok((0, targets))
-    }
-}
+use std::io::{self, ErrorKind};
+use std::process::{exit, Child, Command};
 
 fn main() -> rustyline::Result<()> {
-    let config = Config::builder()
-        .history_ignore_space(true)
-        .completion_type(CompletionType::List)
-        .edit_mode(EditMode::Vi)
-        .bell_style(rustyline::config::BellStyle::Audible)
-        .build();
-
-    // Trie for completion search
-    let mut builder = TrieBuilder::new();
-    // Gather builtins command name
-    for builtin in BUILTINS {
-        builder.push(builtin.name);
-    }
-    // Gather names of executables on path
-    for path in list_path()? {
-        let name = path.file_name().unwrap().to_str().unwrap();
-        builder.push(name);
-    }
-    let trie = builder.build();
-
-    // Create Rustyline helper
-    let h = MyHelper {
-        trie,
-        highlighter: MatchingBracketHighlighter::new(),
-        hinter: HistoryHinter::new(),
-        validator: MatchingBracketValidator::new(),
-    };
-
-    // Set up editor
-    let mut rl = Editor::with_config(config)?;
-    rl.set_helper(Some(h));
-    rl.bind_sequence(KeyEvent::alt('n'), Cmd::HistorySearchForward);
-    rl.bind_sequence(KeyEvent::alt('p'), Cmd::HistorySearchBackward);
+    let mut rl = create_readline()?;
 
     // Main loop
     loop {
@@ -136,8 +50,29 @@ fn main() -> rustyline::Result<()> {
                 }
             }
 
+            let mut children = vec![];
             for (args, mut redirs) in pipeline {
-                shell_exec(&args, &mut redirs)?;
+                let res = shell_exec(&args, &mut redirs);
+                match res {
+                    Ok(child) => {
+                        drop(redirs);
+                        if let Some(child) = child {
+                            children.push(child);
+                        }
+                    }
+                    Err(e) => match e.kind() {
+                        ErrorKind::NotFound => {
+                            writeln!(redirs.stderr, "{}: command not found", args[0])?;
+                        }
+                        _ => {
+                            eprintln!("Unknown Error: {}", e);
+                        }
+                    },
+                }
+            }
+
+            for mut child in children {
+                child.wait()?;
             }
         }
     }
@@ -145,106 +80,33 @@ fn main() -> rustyline::Result<()> {
     Ok(())
 }
 
-// Handle redirections
-fn parse_redirections(words: &[String]) -> (Vec<String>, Redirections) {
-    let mut words = words.iter();
-    let mut args = Vec::new();
-    let mut redirs = Redirections::new();
-    let mut openner = OpenOptions::new();
-    let options = openner.create(true).write(true);
-    while let Some(part) = words.next() {
-        match part.as_str() {
-            ">" | "1>" => {
-                let path = words.next().unwrap();
-                let file = options.truncate(true).open(path).unwrap();
-                redirs.stdout = OutputTarget::File(file);
-            }
-            ">>" | "1>>" => {
-                let path = words.next().unwrap();
-                let file = options.truncate(false).append(true).open(path).unwrap();
-                redirs.stdout = OutputTarget::File(file);
-            }
-            "2>" => {
-                let path = words.next().unwrap();
-                let file = options.truncate(true).open(path).unwrap();
-                redirs.stderr = ErrorTarget::File(file);
-            }
-            "2>>" => {
-                let path = words.next().unwrap();
-                let file = options.truncate(false).append(true).open(path).unwrap();
-                redirs.stderr = ErrorTarget::File(file);
-            }
-            _ => args.push(part.to_string()),
-        }
-    }
-
-    (args, redirs)
-}
-
-fn shell_exec(args: &[String], redirs: &mut Redirections) -> io::Result<()> {
+fn shell_exec(args: &[String], redirs: &mut Redirections) -> io::Result<Option<Child>> {
     if args.is_empty() {
         eprintln!("shell_exec: args is empty");
         exit(exitcode::UNAVAILABLE)
     }
 
-    let res = if let Some(cmd) = BUILTINS.iter().find(|b| b.name == args[0]) {
-        (cmd.func)(args, redirs)
+    if let Some(cmd) = BUILTINS.iter().find(|b| b.name == args[0]) {
+        (cmd.func)(args, redirs)?;
+        Ok(None)
     } else {
-        shell_launch(args, redirs)
-    };
-
-    if let Err(e) = res {
-        match e.kind() {
-            ErrorKind::NotFound => {
-                writeln!(redirs.stderr, "{}: command not found", args[0])?;
-            }
-            _ => {
-                eprintln!("Unknown Error: {}", e);
-            }
-        }
+        Ok(Some(shell_launch(args, redirs)?))
     }
-    Ok(())
 }
 
-fn shell_launch(args: &[String], redirs: &mut Redirections) -> io::Result<()> {
+fn shell_launch(args: &[String], redirs: &mut Redirections) -> io::Result<Child> {
     if args.is_empty() {
         eprintln!("shell_launch: args is empty");
         exit(exitcode::UNAVAILABLE)
     }
     let mut exec = Command::new(&args[0]);
 
-    let mut child = exec
+    let child = exec
         .args(&args[1..])
-        .stdin(redirs.stdin.to_stdio())
-        .stdout(redirs.stdout.to_stdio())
-        .stderr(redirs.stderr.to_stdio())
+        .stdin(redirs.stdin.to_stdio()?)
+        .stdout(redirs.stdout.to_stdio()?)
+        .stderr(redirs.stderr.to_stdio()?)
         .spawn()?;
 
-    if let Some(mut stdin) = child.stdin.take() {
-        if let InputSource::Pipe(reader) = &redirs.stdin {
-            let reader = BufReader::new(reader);
-            for line in reader.lines() {
-                writeln!(stdin, "{}", line?)?;
-            }
-        }
-    }
-
-    if let Some(stdout) = child.stdout.take() {
-        let reader = BufReader::new(stdout);
-        for line in reader.lines() {
-            let line = line?;
-            writeln!(redirs.stdout, "{}", line)?;
-        }
-    }
-
-    if let Some(stderr) = child.stderr.take() {
-        let reader = BufReader::new(stderr);
-        for line in reader.lines() {
-            let line = line?;
-            writeln!(redirs.stderr, "{}", line)?;
-        }
-    }
-
-    child.wait()?;
-    Ok(())
+    Ok(child)
 }
