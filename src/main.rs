@@ -1,5 +1,5 @@
 use codecrafters_shell::builtins::{list_path, BUILTINS};
-use codecrafters_shell::redirections::{ErrorTarget, OutputTarget, Redirections};
+use codecrafters_shell::redirections::{ErrorTarget, InputSource, OutputTarget, Redirections};
 use rustyline::completion::{Completer, Pair};
 use rustyline::error::ReadlineError;
 use rustyline::highlight::{CmdKind, Highlighter, MatchingBracketHighlighter};
@@ -10,7 +10,8 @@ use rustyline::{
 };
 use std::borrow::Cow;
 use std::fs::OpenOptions;
-use std::io::{self, BufRead, BufReader, ErrorKind, Write};
+use std::io::Write;
+use std::io::{self, BufRead, BufReader, ErrorKind};
 use std::process::{exit, Command};
 use trie_rs::{Trie, TrieBuilder};
 
@@ -115,43 +116,69 @@ fn main() -> rustyline::Result<()> {
             }
         }
 
-        // Handle redirections
         if let Ok(parts) = shellwords::split(&input) {
-            let mut parts = parts.iter();
-            let mut args = Vec::new();
-            let mut redirs = Redirections::new();
-            let mut openner = OpenOptions::new();
-            let options = openner.create(true).write(true);
-            while let Some(part) = parts.next() {
-                match part.as_str() {
-                    ">" | "1>" => {
-                        let path = parts.next().unwrap();
-                        let file = options.truncate(true).open(path).unwrap();
-                        redirs.stdout = OutputTarget::File(file);
-                    }
-                    ">>" | "1>>" => {
-                        let path = parts.next().unwrap();
-                        let file = options.truncate(false).append(true).open(path).unwrap();
-                        redirs.stdout = OutputTarget::File(file);
-                    }
-                    "2>" => {
-                        let path = parts.next().unwrap();
-                        let file = options.truncate(true).open(path).unwrap();
-                        redirs.stderr = ErrorTarget::File(file);
-                    }
-                    "2>>" => {
-                        let path = parts.next().unwrap();
-                        let file = options.truncate(false).append(true).open(path).unwrap();
-                        redirs.stderr = ErrorTarget::File(file);
-                    }
-                    _ => args.push(part.to_string()),
+            let mut pipeline: Vec<(Vec<String>, Redirections)> = Vec::new();
+            let pipes = parts.split(|x| *x == "|").peekable();
+            for pipe in pipes {
+                pipeline.push(parse_redirections(pipe));
+            }
+            let mut it = pipeline.iter_mut().peekable();
+            let mut prev_stdin = None;
+            while let Some((_, redirs)) = it.next() {
+                if let Some(prev) = prev_stdin {
+                    redirs.stdin = prev;
+                    prev_stdin = None;
+                }
+                if it.peek().is_some() && matches!(redirs.stdout, OutputTarget::Stdout(_)) {
+                    let (reader, writer) = os_pipe::pipe()?;
+                    redirs.stdout = OutputTarget::Pipe(writer);
+                    prev_stdin = Some(InputSource::Pipe(reader));
                 }
             }
-            shell_exec(&args, &mut redirs)?;
+
+            for (args, mut redirs) in pipeline {
+                shell_exec(&args, &mut redirs)?;
+            }
         }
     }
 
     Ok(())
+}
+
+// Handle redirections
+fn parse_redirections(words: &[String]) -> (Vec<String>, Redirections) {
+    let mut words = words.iter();
+    let mut args = Vec::new();
+    let mut redirs = Redirections::new();
+    let mut openner = OpenOptions::new();
+    let options = openner.create(true).write(true);
+    while let Some(part) = words.next() {
+        match part.as_str() {
+            ">" | "1>" => {
+                let path = words.next().unwrap();
+                let file = options.truncate(true).open(path).unwrap();
+                redirs.stdout = OutputTarget::File(file);
+            }
+            ">>" | "1>>" => {
+                let path = words.next().unwrap();
+                let file = options.truncate(false).append(true).open(path).unwrap();
+                redirs.stdout = OutputTarget::File(file);
+            }
+            "2>" => {
+                let path = words.next().unwrap();
+                let file = options.truncate(true).open(path).unwrap();
+                redirs.stderr = ErrorTarget::File(file);
+            }
+            "2>>" => {
+                let path = words.next().unwrap();
+                let file = options.truncate(false).append(true).open(path).unwrap();
+                redirs.stderr = ErrorTarget::File(file);
+            }
+            _ => args.push(part.to_string()),
+        }
+    }
+
+    (args, redirs)
 }
 
 fn shell_exec(args: &[String], redirs: &mut Redirections) -> io::Result<()> {
@@ -185,11 +212,22 @@ fn shell_launch(args: &[String], redirs: &mut Redirections) -> io::Result<()> {
         exit(exitcode::UNAVAILABLE)
     }
     let mut exec = Command::new(&args[0]);
+
     let mut child = exec
         .args(&args[1..])
+        .stdin(redirs.stdin.to_stdio())
         .stdout(redirs.stdout.to_stdio())
         .stderr(redirs.stderr.to_stdio())
         .spawn()?;
+
+    if let Some(mut stdin) = child.stdin.take() {
+        if let InputSource::Pipe(reader) = &redirs.stdin {
+            let reader = BufReader::new(reader);
+            for line in reader.lines() {
+                writeln!(stdin, "{}", line?)?;
+            }
+        }
+    }
 
     if let Some(stdout) = child.stdout.take() {
         let reader = BufReader::new(stdout);
