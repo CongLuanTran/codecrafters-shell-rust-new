@@ -4,6 +4,8 @@ use codecrafters_shell::redirections::{
     parse_redirections, InputSource, OutputTarget, Redirections,
 };
 use rustyline::error::ReadlineError;
+use rustyline::history::History;
+use std::env::var_os;
 use std::io::Write;
 use std::io::{self, ErrorKind};
 use std::process::{exit, Child, Command};
@@ -24,10 +26,7 @@ fn main() -> rustyline::Result<()> {
             Err(err) => {
                 eprintln!("Input Error: {}", err)
             }
-            Ok(lines) => {
-                rl.add_history_entry(lines.as_str())?;
-                input = lines.to_string()
-            }
+            Ok(lines) => input = lines.to_string(),
         }
 
         if let Ok(parts) = shellwords::split(&input) {
@@ -52,6 +51,47 @@ fn main() -> rustyline::Result<()> {
 
             let mut children = vec![];
             for (args, mut redirs) in pipeline {
+                if args[0] == "exit" {
+                    let code = args.get(1).and_then(|n| n.parse().ok()).unwrap_or_default();
+                    if let Some(histfile) = var_os("HISTFILE") {
+                        rl.append_history(&histfile)?
+                    }
+                    exit(code);
+                }
+                if args[0] == "history" {
+                    let mut it = args.iter().peekable();
+                    if it.len() == 1 {
+                        it.next().unwrap();
+                        for (i, entry) in rl.history().iter().enumerate() {
+                            writeln!(redirs.stdout, "\t{} {}", i + 1, entry)?
+                        }
+                    } else if it.len() == 2 {
+                        it.next().unwrap();
+                        if let Some(thing) = it.next() {
+                            if let Ok(num) = thing.parse::<usize>() {
+                                let skip = rl.history().len().saturating_sub(num);
+                                for (i, entry) in rl.history().iter().enumerate().skip(skip) {
+                                    writeln!(redirs.stdout, "\t{} {}", i + 1, entry)?
+                                }
+                            }
+                        }
+                    } else if it.len() == 3 {
+                        it.next().unwrap();
+                        if let Some(thing) = it.next() {
+                            if let Some(path) = it.next() {
+                                match thing.as_str() {
+                                    "-r" => rl.load_history(path)?,
+                                    "-w" => rl.save_history(path)?,
+                                    "-a" => rl.append_history(path)?,
+                                    _ => {}
+                                }
+                            }
+                        }
+                    }
+
+                    continue;
+                }
+
                 let res = shell_exec(&args, &mut redirs);
                 match res {
                     Ok(child) => {

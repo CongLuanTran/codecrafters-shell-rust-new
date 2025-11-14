@@ -65,7 +65,7 @@ pub fn list_path() -> Result<Vec<PathBuf>> {
 
 fn shell_type(args: &[String], redirs: &mut Redirections) -> Result<()> {
     for cmd in args[1..].iter() {
-        if BUILTINS.iter().any(|b| b.name == cmd) {
+        if cmd == "history" || BUILTINS.iter().any(|b| b.name == cmd) {
             writeln!(redirs.stdout, "{} is a shell builtin", cmd)?;
         } else if let Some(exec) = list_path()?
             .iter()

@@ -130,7 +130,7 @@ pub fn parse_redirections(words: &[String]) -> (Vec<String>, Redirections) {
         match part.as_str() {
             ">" | "1>" => {
                 let path = words.next().unwrap();
-                let file = options.truncate(true).open(path).unwrap();
+                let file = options.write(true).truncate(true).open(path).unwrap();
                 redirs.stdout = OutputTarget::File(file);
             }
             ">>" | "1>>" => {
@@ -140,7 +140,7 @@ pub fn parse_redirections(words: &[String]) -> (Vec<String>, Redirections) {
             }
             "2>" => {
                 let path = words.next().unwrap();
-                let file = options.truncate(true).open(path).unwrap();
+                let file = options.write(true).truncate(true).open(path).unwrap();
                 redirs.stderr = ErrorTarget::File(file);
             }
             "2>>" => {

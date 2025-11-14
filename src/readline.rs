@@ -6,8 +6,8 @@ use rustyline::{
     validate::MatchingBracketValidator,
     Cmd, CompletionType, Config, EditMode, Editor, Helper, Hinter, KeyEvent, Validator,
 };
-use std::borrow::Cow;
 use std::io::Result;
+use std::{borrow::Cow, env::var_os};
 use trie_rs::{Trie, TrieBuilder};
 
 use crate::builtins::{list_path, BUILTINS};
@@ -85,7 +85,7 @@ fn create_helper() -> Result<MyHelper> {
 
 pub fn create_readline() -> rustyline::Result<Editor<MyHelper, FileHistory>> {
     let config = Config::builder()
-        .history_ignore_space(true)
+        .auto_add_history(true)
         .completion_type(CompletionType::List)
         .edit_mode(EditMode::Vi)
         .bell_style(rustyline::config::BellStyle::Audible)
@@ -93,6 +93,9 @@ pub fn create_readline() -> rustyline::Result<Editor<MyHelper, FileHistory>> {
     let h = create_helper()?;
 
     let mut rl = Editor::with_config(config)?;
+    if let Some(histfile) = var_os("HISTFILE") {
+        if rl.load_history(&histfile).is_err() {}
+    }
     rl.set_helper(Some(h));
     rl.bind_sequence(KeyEvent::alt('n'), Cmd::HistorySearchForward);
     rl.bind_sequence(KeyEvent::alt('p'), Cmd::HistorySearchBackward);
