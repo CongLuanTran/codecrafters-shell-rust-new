@@ -69,28 +69,39 @@ fn main() -> rustyline::Result<()> {
         .bell_style(rustyline::config::BellStyle::Audible)
         .build();
 
+    // Trie for completion search
     let mut builder = TrieBuilder::new();
+    // Gather builtins command name
     for builtin in BUILTINS {
         builder.push(builtin.name);
     }
+    // Gather names of executables on path
     for path in list_path()? {
         let name = path.file_name().unwrap().to_str().unwrap();
         builder.push(name);
     }
     let trie = builder.build();
 
+    // Create Rustyline helper
     let h = MyHelper {
         trie,
         highlighter: MatchingBracketHighlighter::new(),
         hinter: HistoryHinter::new(),
         validator: MatchingBracketValidator::new(),
     };
+
+    // Set up editor
     let mut rl = Editor::with_config(config)?;
     rl.set_helper(Some(h));
     rl.bind_sequence(KeyEvent::alt('n'), Cmd::HistorySearchForward);
     rl.bind_sequence(KeyEvent::alt('p'), Cmd::HistorySearchBackward);
+
+    // Main loop
     loop {
+        // Readline
         let readline = rl.readline("$ ");
+
+        // Handle Ctrl-D and Ctrl-C
         let mut input = String::new();
         match readline {
             Err(ReadlineError::Interrupted) => continue,
@@ -104,40 +115,39 @@ fn main() -> rustyline::Result<()> {
             }
         }
 
-        for line in input.lines() {
-            if let Ok(parts) = shellwords::split(line) {
-                let mut parts = parts.iter();
-                let mut args = Vec::new();
-                let mut redirs = Redirections::new();
-                let mut openner = OpenOptions::new();
-                let options = openner.create(true).write(true);
-                while let Some(part) = parts.next() {
-                    match part.as_str() {
-                        ">" | "1>" => {
-                            let path = parts.next().unwrap();
-                            let file = options.truncate(true).open(path).unwrap();
-                            redirs.stdout = OutputTarget::File(file);
-                        }
-                        ">>" | "1>>" => {
-                            let path = parts.next().unwrap();
-                            let file = options.truncate(false).append(true).open(path).unwrap();
-                            redirs.stdout = OutputTarget::File(file);
-                        }
-                        "2>" => {
-                            let path = parts.next().unwrap();
-                            let file = options.truncate(true).open(path).unwrap();
-                            redirs.stderr = ErrorTarget::File(file);
-                        }
-                        "2>>" => {
-                            let path = parts.next().unwrap();
-                            let file = options.truncate(false).append(true).open(path).unwrap();
-                            redirs.stderr = ErrorTarget::File(file);
-                        }
-                        _ => args.push(part.to_string()),
+        // Handle redirections
+        if let Ok(parts) = shellwords::split(&input) {
+            let mut parts = parts.iter();
+            let mut args = Vec::new();
+            let mut redirs = Redirections::new();
+            let mut openner = OpenOptions::new();
+            let options = openner.create(true).write(true);
+            while let Some(part) = parts.next() {
+                match part.as_str() {
+                    ">" | "1>" => {
+                        let path = parts.next().unwrap();
+                        let file = options.truncate(true).open(path).unwrap();
+                        redirs.stdout = OutputTarget::File(file);
                     }
+                    ">>" | "1>>" => {
+                        let path = parts.next().unwrap();
+                        let file = options.truncate(false).append(true).open(path).unwrap();
+                        redirs.stdout = OutputTarget::File(file);
+                    }
+                    "2>" => {
+                        let path = parts.next().unwrap();
+                        let file = options.truncate(true).open(path).unwrap();
+                        redirs.stderr = ErrorTarget::File(file);
+                    }
+                    "2>>" => {
+                        let path = parts.next().unwrap();
+                        let file = options.truncate(false).append(true).open(path).unwrap();
+                        redirs.stderr = ErrorTarget::File(file);
+                    }
+                    _ => args.push(part.to_string()),
                 }
-                shell_exec(&args, &mut redirs)?;
             }
+            shell_exec(&args, &mut redirs)?;
         }
     }
 
