@@ -1,0 +1,9 @@
+#V2
+history
+history -w hist
+history
+clear
+cat hist
+exit 0
+cat hist
+exit
