@@ -6,8 +6,8 @@ use rustyline::{
     validate::MatchingBracketValidator,
     Cmd, CompletionType, Config, EditMode, Editor, Helper, Hinter, KeyEvent, Validator,
 };
+use std::borrow::Cow;
 use std::io::Result;
-use std::{borrow::Cow, env::var_os};
 use trie_rs::{Trie, TrieBuilder};
 
 use crate::builtins::{list_path, BUILTINS};
@@ -93,9 +93,6 @@ pub fn create_readline() -> rustyline::Result<Editor<MyHelper, FileHistory>> {
     let h = create_helper()?;
 
     let mut rl = Editor::with_config(config)?;
-    if let Some(histfile) = var_os("HISTFILE") {
-        if rl.load_history(&histfile).is_err() {}
-    }
     rl.set_helper(Some(h));
     rl.bind_sequence(KeyEvent::alt('n'), Cmd::HistorySearchForward);
     rl.bind_sequence(KeyEvent::alt('p'), Cmd::HistorySearchBackward);

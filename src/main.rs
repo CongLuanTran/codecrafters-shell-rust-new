@@ -6,12 +6,21 @@ use codecrafters_shell::redirections::{
 use rustyline::error::ReadlineError;
 use rustyline::history::History;
 use std::env::var_os;
+use std::fs::OpenOptions;
 use std::io::Write;
 use std::io::{self, ErrorKind};
 use std::process::{exit, Child, Command};
 
 fn main() -> rustyline::Result<()> {
     let mut rl = create_readline()?;
+    if let Some(histfile) = var_os("HISTFILE") {
+        println!("HISTFILE is {}", &histfile.to_string_lossy());
+        if rl.load_history(&histfile).is_err() {
+            eprintln!("History file not found")
+        }
+    }
+    let mut history_pointer = rl.history().len();
+    let history_exit_pointer = rl.history().len();
 
     // Main loop
     loop {
@@ -26,7 +35,10 @@ fn main() -> rustyline::Result<()> {
             Err(err) => {
                 eprintln!("Input Error: {}", err)
             }
-            Ok(lines) => input = lines.to_string(),
+            Ok(lines) => {
+                history_pointer += 1;
+                input = lines.to_string();
+            }
         }
 
         if let Ok(parts) = shellwords::split(&input) {
@@ -54,7 +66,13 @@ fn main() -> rustyline::Result<()> {
                 if args[0] == "exit" {
                     let code = args.get(1).and_then(|n| n.parse().ok()).unwrap_or_default();
                     if let Some(histfile) = var_os("HISTFILE") {
-                        rl.append_history(&histfile)?
+                        let mut file = OpenOptions::new()
+                            .append(true)
+                            .create(true)
+                            .open(histfile)?;
+                        for line in rl.history().iter().skip(history_exit_pointer) {
+                            writeln!(file, "{}", line)?;
+                        }
                     }
                     exit(code);
                 }
@@ -81,8 +99,27 @@ fn main() -> rustyline::Result<()> {
                             if let Some(path) = it.next() {
                                 match thing.as_str() {
                                     "-r" => rl.load_history(path)?,
-                                    "-w" => rl.save_history(path)?,
-                                    "-a" => rl.append_history(path)?,
+                                    "-w" => {
+                                        let mut file = OpenOptions::new()
+                                            .write(true)
+                                            .truncate(true)
+                                            .create(true)
+                                            .open(path)?;
+                                        for entry in rl.history() {
+                                            writeln!(file, "{}", entry)?
+                                        }
+                                    }
+
+                                    "-a" => {
+                                        let mut file = OpenOptions::new()
+                                            .append(true)
+                                            .create(true)
+                                            .open(path)?;
+                                        for line in rl.history().iter().skip(history_pointer) {
+                                            writeln!(file, "{}", line)?;
+                                        }
+                                        history_pointer = rl.history().len()
+                                    }
                                     _ => {}
                                 }
                             }
