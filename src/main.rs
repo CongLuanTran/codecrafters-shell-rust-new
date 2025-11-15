@@ -14,7 +14,6 @@ use std::process::{exit, Child, Command};
 fn main() -> rustyline::Result<()> {
     let mut rl = create_readline()?;
     if let Some(histfile) = var_os("HISTFILE") {
-        println!("HISTFILE is {}", &histfile.to_string_lossy());
         if rl.load_history(&histfile).is_err() {
             eprintln!("History file not found")
         }
