@@ -19,7 +19,7 @@ fn main() -> rustyline::Result<()> {
         }
     }
     let mut history_pointer = 0;
-    let mut history_exit_pointer = rl.history().len();
+    let history_exit_pointer = rl.history().len();
 
     // Main loop
     loop {
@@ -34,10 +34,7 @@ fn main() -> rustyline::Result<()> {
             Err(err) => {
                 eprintln!("Input Error: {}", err)
             }
-            Ok(lines) => {
-                history_exit_pointer += 1;
-                input = lines.to_string();
-            }
+            Ok(lines) => input = lines.to_string(),
         }
 
         if let Ok(parts) = shellwords::split(&input) {
