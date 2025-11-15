@@ -18,7 +18,7 @@ fn main() -> rustyline::Result<()> {
             eprintln!("History file not found")
         }
     }
-    let mut history_pointer = rl.history().len();
+    let mut history_pointer = 0;
     let history_exit_pointer = rl.history().len();
 
     // Main loop
