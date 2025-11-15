@@ -19,7 +19,7 @@ fn main() -> rustyline::Result<()> {
         }
     }
     let mut history_pointer = 0;
-    let history_exit_pointer = rl.history().len();
+    let mut history_exit_pointer = rl.history().len();
 
     // Main loop
     loop {
@@ -35,7 +35,7 @@ fn main() -> rustyline::Result<()> {
                 eprintln!("Input Error: {}", err)
             }
             Ok(lines) => {
-                history_pointer += 1;
+                history_exit_pointer += 1;
                 input = lines.to_string();
             }
         }
@@ -65,12 +65,14 @@ fn main() -> rustyline::Result<()> {
                 if args[0] == "exit" {
                     let code = args.get(1).and_then(|n| n.parse().ok()).unwrap_or_default();
                     if let Some(histfile) = var_os("HISTFILE") {
-                        let mut file = OpenOptions::new()
-                            .append(true)
-                            .create(true)
-                            .open(histfile)?;
-                        for line in rl.history().iter().skip(history_exit_pointer) {
-                            writeln!(file, "{}", line)?;
+                        if !histfile.is_empty() {
+                            let mut file = OpenOptions::new()
+                                .append(true)
+                                .create(true)
+                                .open(histfile)?;
+                            for line in rl.history().iter().skip(history_exit_pointer) {
+                                writeln!(file, "{}", line)?;
+                            }
                         }
                     }
                     exit(code);
