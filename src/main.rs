@@ -1,12 +1,10 @@
 use codecrafters_shell::builtins::BUILTINS;
-use codecrafters_shell::readline::create_readline;
+use codecrafters_shell::readline::{create_readline, MyShell};
 use codecrafters_shell::redirections::{
     parse_redirections, InputSource, OutputTarget, Redirections,
 };
 use rustyline::error::ReadlineError;
-use rustyline::history::History;
 use std::env::var_os;
-use std::fs::OpenOptions;
 use std::io::Write;
 use std::io::{self, ErrorKind};
 use std::process::{exit, Child, Command};
@@ -18,8 +16,6 @@ fn main() -> rustyline::Result<()> {
             eprintln!("History file not found")
         }
     }
-    let mut history_pointer = 0;
-    let history_exit_pointer = rl.history().len();
 
     // Main loop
     loop {
@@ -59,75 +55,7 @@ fn main() -> rustyline::Result<()> {
 
             let mut children = vec![];
             for (args, mut redirs) in pipeline {
-                if args[0] == "exit" {
-                    let code = args.get(1).and_then(|n| n.parse().ok()).unwrap_or_default();
-                    if let Some(histfile) = var_os("HISTFILE") {
-                        if !histfile.is_empty() {
-                            let mut file = OpenOptions::new()
-                                .append(true)
-                                .create(true)
-                                .open(histfile)?;
-                            for line in rl.history().iter().skip(history_exit_pointer) {
-                                writeln!(file, "{}", line)?;
-                            }
-                        }
-                    }
-                    exit(code);
-                }
-                if args[0] == "history" {
-                    let mut it = args.iter().peekable();
-                    if it.len() == 1 {
-                        it.next().unwrap();
-                        for (i, entry) in rl.history().iter().enumerate() {
-                            writeln!(redirs.stdout, "\t{} {}", i + 1, entry)?
-                        }
-                    } else if it.len() == 2 {
-                        it.next().unwrap();
-                        if let Some(thing) = it.next() {
-                            if let Ok(num) = thing.parse::<usize>() {
-                                let skip = rl.history().len().saturating_sub(num);
-                                for (i, entry) in rl.history().iter().enumerate().skip(skip) {
-                                    writeln!(redirs.stdout, "\t{} {}", i + 1, entry)?
-                                }
-                            }
-                        }
-                    } else if it.len() == 3 {
-                        it.next().unwrap();
-                        if let Some(thing) = it.next() {
-                            if let Some(path) = it.next() {
-                                match thing.as_str() {
-                                    "-r" => rl.load_history(path)?,
-                                    "-w" => {
-                                        let mut file = OpenOptions::new()
-                                            .write(true)
-                                            .truncate(true)
-                                            .create(true)
-                                            .open(path)?;
-                                        for entry in rl.history() {
-                                            writeln!(file, "{}", entry)?
-                                        }
-                                    }
-
-                                    "-a" => {
-                                        let mut file = OpenOptions::new()
-                                            .append(true)
-                                            .create(true)
-                                            .open(path)?;
-                                        for line in rl.history().iter().skip(history_pointer) {
-                                            writeln!(file, "{}", line)?;
-                                        }
-                                        history_pointer = rl.history().len()
-                                    }
-                                    _ => {}
-                                }
-                            }
-                        }
-                    }
-
-                    continue;
-                }
-
-                let res = shell_exec(&args, &mut redirs);
+                let res = shell_exec(&mut rl, &args, &mut redirs);
                 match res {
                     Ok(child) => {
                         drop(redirs);
@@ -155,14 +83,18 @@ fn main() -> rustyline::Result<()> {
     Ok(())
 }
 
-fn shell_exec(args: &[String], redirs: &mut Redirections) -> io::Result<Option<Child>> {
+fn shell_exec(
+    shell: &mut MyShell,
+    args: &[String],
+    redirs: &mut Redirections,
+) -> io::Result<Option<Child>> {
     if args.is_empty() {
         eprintln!("shell_exec: args is empty");
         exit(exitcode::UNAVAILABLE)
     }
 
     if let Some(cmd) = BUILTINS.iter().find(|b| b.name == args[0]) {
-        (cmd.func)(args, redirs)?;
+        (cmd.func)(shell, args, redirs)?;
         Ok(None)
     } else {
         Ok(Some(shell_launch(args, redirs)?))

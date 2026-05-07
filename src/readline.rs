@@ -2,7 +2,6 @@ use rustyline::{
     completion::{Completer, Pair},
     highlight::{CmdKind, Highlighter, MatchingBracketHighlighter},
     hint::HistoryHinter,
-    history::FileHistory,
     validate::MatchingBracketValidator,
     Cmd, CompletionType, Config, EditMode, Editor, Helper, Hinter, KeyEvent, Validator,
 };
@@ -10,7 +9,12 @@ use std::borrow::Cow;
 use std::io::Result;
 use trie_rs::{Trie, TrieBuilder};
 
-use crate::builtins::{list_path, BUILTINS};
+use crate::{
+    builtins::{list_path, BUILTINS},
+    history::MyHistory,
+};
+
+pub type MyShell = Editor<MyHelper, MyHistory>;
 
 #[derive(Helper, Hinter, Validator)]
 pub struct MyHelper {
@@ -83,7 +87,7 @@ fn create_helper() -> Result<MyHelper> {
     })
 }
 
-pub fn create_readline() -> rustyline::Result<Editor<MyHelper, FileHistory>> {
+pub fn create_readline() -> rustyline::Result<MyShell> {
     let config = Config::builder()
         .auto_add_history(true)
         .completion_type(CompletionType::List)
@@ -92,7 +96,9 @@ pub fn create_readline() -> rustyline::Result<Editor<MyHelper, FileHistory>> {
         .build();
     let h = create_helper()?;
 
-    let mut rl = Editor::with_config(config)?;
+    let history = MyHistory::new();
+
+    let mut rl = Editor::with_history(config, history)?;
     rl.set_helper(Some(h));
     rl.bind_sequence(KeyEvent::alt('n'), Cmd::HistorySearchForward);
     rl.bind_sequence(KeyEvent::alt('p'), Cmd::HistorySearchBackward);
