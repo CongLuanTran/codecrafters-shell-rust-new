@@ -70,7 +70,7 @@ impl Completer for MyHelper {
                 targets
                     .into_iter()
                     .map(|p: Pair| Pair {
-                        display: p.display,
+                        display: p.replacement.clone(),
                         replacement: if p.replacement.ends_with('/') {
                             p.replacement
                         } else {
