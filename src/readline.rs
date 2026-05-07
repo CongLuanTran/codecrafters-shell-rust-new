@@ -71,7 +71,11 @@ impl Completer for MyHelper {
                     .into_iter()
                     .map(|p: Pair| Pair {
                         display: p.display,
-                        replacement: p.replacement + " ",
+                        replacement: if p.replacement.ends_with('/') {
+                            p.replacement
+                        } else {
+                            p.replacement + " "
+                        },
                     })
                     .collect(),
             ))
