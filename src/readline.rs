@@ -111,6 +111,7 @@ fn create_helper() -> Result<MyHelper> {
 
 pub fn create_readline() -> rustyline::Result<MyShell> {
     let config = Config::builder()
+        .history_ignore_dups(false)?
         .auto_add_history(true)
         .completion_type(CompletionType::List)
         .edit_mode(EditMode::Vi)
