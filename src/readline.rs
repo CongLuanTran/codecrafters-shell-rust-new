@@ -1,5 +1,5 @@
 use rustyline::{
-    completion::{Completer, Pair},
+    completion::{self, Completer, FilenameCompleter, Pair},
     highlight::{CmdKind, Highlighter, MatchingBracketHighlighter},
     hint::HistoryHinter,
     validate::MatchingBracketValidator,
@@ -19,6 +19,7 @@ pub type MyShell = Editor<MyHelper, MyHistory>;
 #[derive(Helper, Hinter, Validator)]
 pub struct MyHelper {
     trie: Trie<u8>,
+    filenamecompleter: FilenameCompleter,
     highlighter: MatchingBracketHighlighter,
     #[rustyline(Validator)]
     validator: MatchingBracketValidator,
@@ -44,21 +45,37 @@ impl Completer for MyHelper {
     type Candidate = Pair;
 
     fn complete(
-        &self, // FIXME should be `&mut self`
+        &self,
         line: &str,
         pos: usize,
         _ctx: &rustyline::Context<'_>,
     ) -> rustyline::Result<(usize, Vec<Self::Candidate>)> {
-        let prefix = &line[..pos];
-        let targets = self
-            .trie
-            .predictive_search(prefix)
-            .map(|s: String| Pair {
-                display: s.clone(),
-                replacement: s + " ",
-            })
-            .collect();
-        Ok((0, targets))
+        let (start, word) = completion::extract_word(line, pos, None, char::is_whitespace);
+
+        if start == 0 || line[..start].chars().all(char::is_whitespace) {
+            let targets = self
+                .trie
+                .predictive_search(word)
+                .map(|s: String| Pair {
+                    display: s.clone(),
+                    replacement: s + " ",
+                })
+                .collect();
+
+            Ok((start, targets))
+        } else {
+            let (start, targets) = self.filenamecompleter.complete(line, pos, _ctx)?;
+            Ok((
+                start,
+                targets
+                    .into_iter()
+                    .map(|p: Pair| Pair {
+                        display: p.display,
+                        replacement: p.replacement + " ",
+                    })
+                    .collect(),
+            ))
+        }
     }
 }
 
@@ -81,6 +98,7 @@ fn create_helper() -> Result<MyHelper> {
     let trie = gather_executables()?;
     Ok(MyHelper {
         trie,
+        filenamecompleter: FilenameCompleter::new(),
         highlighter: MatchingBracketHighlighter::new(),
         validator: MatchingBracketValidator::new(),
         hinter: HistoryHinter {},
