@@ -15,7 +15,7 @@ pub struct Builtin {
     pub func: fn(shell: &mut MyShell, args: &[String], redirs: &mut Redirections) -> Result<()>,
 }
 
-pub static BUILTINS: [Builtin; 6] = [
+pub static BUILTINS: [Builtin; 7] = [
     Builtin {
         name: "exit",
         func: shell_exit,
@@ -39,6 +39,10 @@ pub static BUILTINS: [Builtin; 6] = [
     Builtin {
         name: "history",
         func: shell_history,
+    },
+    Builtin {
+        name: "jobs",
+        func: shell_jobs,
     },
 ];
 
@@ -149,5 +153,9 @@ fn shell_history(shell: &mut MyShell, args: &[String], redirs: &mut Redirections
         };
     };
 
+    Ok(())
+}
+
+fn shell_jobs(_: &mut MyShell, _: &[String], redirs: &mut Redirections) -> Result<()> {
     Ok(())
 }
