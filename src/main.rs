@@ -16,6 +16,7 @@ fn main() -> rustyline::Result<()> {
             eprintln!("History file not found")
         }
     }
+    let mut job_counter = 1;
 
     // Main loop
     loop {
@@ -54,13 +55,23 @@ fn main() -> rustyline::Result<()> {
             }
 
             let mut children = vec![];
-            for (args, mut redirs) in pipeline {
+            for (mut args, mut redirs) in pipeline {
+                let is_background = Some(&"&".to_string()) == args.last();
+                if is_background {
+                    args.pop();
+                }
+
                 let res = shell_exec(&mut rl, &args, &mut redirs);
                 match res {
                     Ok(child) => {
                         drop(redirs);
                         if let Some(child) = child {
-                            children.push(child);
+                            if is_background {
+                                println!("[{}] {}", job_counter, child.id());
+                                job_counter += 1;
+                            } else {
+                                children.push(child);
+                            }
                         }
                     }
                     Err(e) => match e.kind() {
